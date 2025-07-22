@@ -1,0 +1,52 @@
+{
+  "name": "quick-vrt-extension",
+  "version": "1.0.0",
+  "description": "Quick Visual Regression Testing Chrome Extension built with Preact",
+  "main": "dist/popup.js",
+  "scripts": {
+    "dev": "bun run build:watch",
+    "build": "bun run clean && bun run build:all",
+    "build:all": "mkdir -p dist && bun run build:popup && bun run build:background && bun run build:content && bun run copy:static",
+    "build:watch": "bun run build --watch",
+    "build:popup": "bun build src/popup/index.tsx --outfile=dist/popup.js --target browser",
+    "build:background": "bun build src/background/index.ts --outfile=dist/background.js --target browser",
+    "build:content": "bun build src/content/index.ts --outfile=dist/content.js --target browser",
+    "copy:static": "bun run copy:manifest && bun run copy:icons && bun run copy:popup-html && bun run copy:popup-css",
+    "copy:manifest": "cp manifest.json dist/",
+    "copy:icons": "cp -r icons dist/",
+    "copy:popup-html": "cp src/popup/popup.html dist/",
+    "copy:popup-css": "cp src/popup/styles.css dist/popup.css",
+    "clean": "rm -rf dist",
+    "lint": "eslint src/**/*.{ts,tsx}",
+    "type-check": "tsc --noEmit",
+    "prepare": "bun run clean && bun run build"
+  },
+  "dependencies": {
+    "preact": "^10.24.3",
+    "pixelmatch": "^6.0.0",
+    "pngjs": "^7.0.0",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.278",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "@typescript-eslint/eslint-plugin": "^8.18.1",
+    "@typescript-eslint/parser": "^8.18.1",
+    "eslint": "^9.18.0",
+    "typescript": "^5.7.2"
+  },
+  "keywords": [
+    "chrome-extension",
+    "visual-regression-testing",
+    "preact",
+    "screenshot",
+    "diff",
+    "vrt"
+  ],
+  "author": "arrow2nd",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
