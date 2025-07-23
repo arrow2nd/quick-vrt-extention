@@ -6,6 +6,7 @@ export interface VRTSettings {
   autoScroll: boolean;
   diffThreshold: number;
   diffColor: string;
+  maskVideos: boolean;
 }
 
 export interface CaptureResult {
@@ -57,7 +58,9 @@ export type MessageType =
   | 'SCROLL_TO_BOTTOM'
   | 'GET_PAGE_INFO'
   | 'DISABLE_ANIMATIONS'
-  | 'RESTORE_PAGE';
+  | 'RESTORE_PAGE'
+  | 'MASK_VIDEOS'
+  | 'UNMASK_VIDEOS';
 
 export interface ChromeMessage {
   type: MessageType;
@@ -94,23 +97,3 @@ export interface ComparisonTabsProps {
   onTabChange: (tab: ComparisonTab) => void;
 }
 
-export interface ComparisonResultProps {
-  result: ComparisonResult;
-  beforeImage: CaptureResult;
-  afterImage: CaptureResult;
-  activeTab: ComparisonTab;
-  onTabChange: (tab: ComparisonTab) => void;
-  onSave: () => void;
-  onNewComparison: () => void;
-}
-
-export interface HistoryListProps {
-  items: HistoryItem[];
-  onItemClick: (item: HistoryItem) => void;
-}
-
-export interface SettingsFormProps {
-  settings: VRTSettings;
-  onSave: (settings: VRTSettings) => void;
-  onReset: () => void;
-}

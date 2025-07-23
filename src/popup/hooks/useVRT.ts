@@ -28,7 +28,8 @@ export function useVRT() {
     imageQuality: 'medium',
     autoScroll: false,
     diffThreshold: 0.1,
-    diffColor: '#ff0000'
+    diffColor: '#ff0000',
+    maskVideos: false
   });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [currentUrl, setCurrentUrl] = useState<string>('');
@@ -36,7 +37,7 @@ export function useVRT() {
   const [showTabSelector, setShowTabSelector] = useState(false);
   const [useFullPageCapture, setUseFullPageCapture] = useState(true);
   const [shouldAutoCompare, setShouldAutoCompare] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState<number | null>(null); // null = デバイスデフォルト
+  const [initialTabId, setInitialTabId] = useState<number | null>(null);
 
   // 比較実行
   const compareImages = useCallback(async () => {
@@ -60,6 +61,19 @@ export function useVRT() {
 
       setComparisonResult(result);
 
+      // 結果が表示されたタイミングでBeforeスクリーンショットのページに遷移
+      if (initialTabId && beforeImage.url) {
+        try {
+          await chrome.tabs.update(initialTabId, { 
+            url: beforeImage.url,
+            active: true 
+          });
+          console.log(`Beforeページに遷移しました: ${beforeImage.url}`);
+        } catch (error) {
+          console.warn('Beforeページに遷移できませんでした:', error);
+        }
+      }
+
       // 履歴に保存（基本情報のみ）
       await ChromeAPI.saveToHistory({
         timestamp: result.timestamp,
@@ -72,25 +86,8 @@ export function useVRT() {
         diffImageUrl: result.diffImageUrl
       });
 
-      // 結果を別タブで開く
-      try {
-        // HTMLレポートを生成
-        const reportHtml = ImageUtils.generateReportHtml(result, beforeImage, afterImage);
-        // data:URLで即座表示（CSPの制約なしでJSが動作）
-        const dataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(reportHtml);
-        
-        // 新しいタブでレポートを開く
-        await chrome.tabs.create({
-          url: dataUrl,
-          active: true
-        });
-        
-        // ポップアップを閉じる
-        window.close();
-        
-      } catch (tabError) {
-        console.error('結果タブ作成エラー:', tabError);
-      }
+      // 自動的に結果タブを開く機能は削除（ユーザーが「結果を保存」ボタンを押した時に開く）
+      // 結果はポップアップ内で確認できるようになりました
 
       return result;
     } catch (error) {
@@ -99,7 +96,7 @@ export function useVRT() {
     } finally {
       setLoading(false);
     }
-  }, [beforeImage, afterImage, settings]);
+  }, [beforeImage, afterImage, settings, initialTabId]);
 
   // 自動比較の実行
   useEffect(() => {
@@ -124,6 +121,7 @@ export function useVRT() {
       setSettings(loadedSettings);
       setHistory(loadedHistory);
       setCurrentUrl(tabInfo.url || '');
+      setInitialTabId(tabInfo.id || null);
     } catch (error) {
       console.error('初期化エラー:', error);
     }
@@ -180,15 +178,16 @@ export function useVRT() {
             imageQuality: settings.imageQuality,
             disableAnimations: true,
             triggerLazyLoading: true,
+            maskVideos: settings.maskVideos,
             progressCallback: updateProgress,
-            viewportWidth: viewportWidth // ビューポート幅を渡す
           });
         } catch (fullPageError) {
           console.warn('フルページスクリーンショット失敗、通常のスクリーンショットで代替:', fullPageError);
           setLoadingText(`${type}スクリーンショットを撮影中...`);
           result = await ChromeAPI.captureScreenshot({
             imageQuality: settings.imageQuality,
-            autoScroll: settings.autoScroll
+            autoScroll: settings.autoScroll,
+            maskVideos: settings.maskVideos
           });
         }
       } else {
@@ -300,15 +299,16 @@ export function useVRT() {
             imageQuality: settings.imageQuality,
             disableAnimations: true,
             triggerLazyLoading: true,
+            maskVideos: settings.maskVideos,
             progressCallback: updateProgress,
-            viewportWidth: viewportWidth // ビューポート幅を渡す
           });
         } catch (fullPageError) {
           console.warn('フルページスクリーンショット失敗、通常のスクリーンショットで代替:', fullPageError);
           setLoadingText('Afterスクリーンショットを撮影中...');
           result = await ChromeAPI.captureScreenshot({
             imageQuality: settings.imageQuality,
-            autoScroll: settings.autoScroll
+            autoScroll: settings.autoScroll,
+            maskVideos: settings.maskVideos
           });
         }
       } else {
@@ -346,19 +346,39 @@ export function useVRT() {
     }
   }, [updateCurrentUrl]);
 
-  // 結果保存
+  // 結果保存（HTMLダウンロード方式）
   const saveResult = useCallback(async () => {
     if (!comparisonResult || !beforeImage || !afterImage) return;
 
     try {
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const reportHtml = ImageUtils.generateReportHtml(comparisonResult, beforeImage, afterImage);
-      const blob = new Blob([reportHtml], { type: 'text/html' });
+      console.log('VRTレポートをHTMLファイルとしてダウンロードします');
       
-      await ChromeAPI.downloadFile(blob, `vrt-report-${timestamp}.html`);
-      await ChromeAPI.showNotification('Quick VRT', 'レポートを保存しました');
+      // HTMLレポートを生成
+      const reportHtml = ImageUtils.generateReportHtml(comparisonResult, beforeImage, afterImage);
+      
+      // HTMLファイルをダウンロード
+      const blob = new Blob([reportHtml], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      const timestamp = new Date(comparisonResult.timestamp).toISOString().slice(0, 19).replace(/:/g, '-');
+      const filename = `vrt-report-${timestamp}.html`;
+      
+      await chrome.downloads.download({
+        url: url,
+        filename: filename,
+        saveAs: false
+      });
+      
+      // クリーンアップ
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 1000);
+      
+      // 通知表示
+      await ChromeAPI.showNotification('Quick VRT', `レポートをダウンロードしました: ${filename}`);
+      
     } catch (error) {
-      console.error('保存エラー:', error);
+      console.error('レポートダウンロードエラー:', error);
       throw error;
     }
   }, [comparisonResult, beforeImage, afterImage]);
@@ -385,28 +405,6 @@ export function useVRT() {
     }
   }, []);
 
-  // 結果を別タブで開く
-  const openResultInNewTab = useCallback(async (result: ComparisonResult, before: CaptureResult, after: CaptureResult) => {
-    try {
-      const reportHtml = ImageUtils.generateReportHtml(result, before, after);
-      
-      // HTMLをBlobとして作成
-      const blob = new Blob([reportHtml], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      
-      // 新しいタブでレポートを開く
-      await chrome.tabs.create({
-        url: url,
-        active: true
-      });
-      
-      // ポップアップを閉じる
-      window.close();
-      
-    } catch (error) {
-      console.error('結果タブ作成エラー:', error);
-    }
-  }, []);
 
   // 新しい比較開始
   const startNewComparison = useCallback(() => {
@@ -471,7 +469,6 @@ export function useVRT() {
     afterUrl,
     showTabSelector,
     useFullPageCapture,
-    viewportWidth,
     
     // アクション
     initialize,
@@ -485,10 +482,8 @@ export function useVRT() {
     selectUrlFromTab,
     setShowTabSelector,
     setUseFullPageCapture,
-    setViewportWidth,
     goToStep,
     compareImages,
-    openResultInNewTab,
     saveResult,
     saveSettings,
     loadHistory,

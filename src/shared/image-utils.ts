@@ -1,7 +1,6 @@
 // 画像処理のユーティリティ関数
 
 import pixelmatch from "pixelmatch";
-import { PNG } from "pngjs";
 import type { CaptureResult, ComparisonResult } from "./types";
 
 export class ImageUtils {
@@ -40,7 +39,6 @@ export class ImageUtils {
     } = {},
   ): Promise<ComparisonResult> {
     const threshold = options.threshold ?? 0.1;
-    const diffColor = options.diffColor ?? "#ff0000";
 
     // 画像データを取得
     const beforeData = await this.dataUrlToImageData(beforeImage.dataUrl);
@@ -49,16 +47,20 @@ export class ImageUtils {
     // サイズを合わせる（メモリ節約のため制限あり）
     const maxWidth = 2000; // 最大幅制限
     const maxHeight = 10000; // 最大高さ制限
-    
+
     let width = Math.max(beforeData.width, afterData.width);
     let height = Math.max(beforeData.height, afterData.height);
-    
+
     // メモリ使用量を制限
     if (width > maxWidth || height > maxHeight) {
       const scale = Math.min(maxWidth / width, maxHeight / height);
       width = Math.floor(width * scale);
       height = Math.floor(height * scale);
-      console.log(`画像サイズを縮小: ${Math.floor(width / scale)} x ${Math.floor(height / scale)} -> ${width} x ${height}`);
+      console.log(
+        `画像サイズを縮小: ${Math.floor(width / scale)} x ${
+          Math.floor(height / scale)
+        } -> ${width} x ${height}`,
+      );
     }
 
     // 画像のリサイズ（必要な場合）
@@ -110,29 +112,32 @@ export class ImageUtils {
     if (imageData.width === targetWidth && imageData.height === targetHeight) {
       return imageData;
     }
-    
+
     // 元画像が大きすぎる場合はスケールダウン
     let sourceWidth = imageData.width;
     let sourceHeight = imageData.height;
     let sourceImageData = imageData;
-    
+
     const maxDimension = 2000;
     if (sourceWidth > maxDimension || sourceHeight > maxDimension) {
-      const scale = Math.min(maxDimension / sourceWidth, maxDimension / sourceHeight);
+      const scale = Math.min(
+        maxDimension / sourceWidth,
+        maxDimension / sourceHeight,
+      );
       const scaledWidth = Math.floor(sourceWidth * scale);
       const scaledHeight = Math.floor(sourceHeight * scale);
-      
-      const scaledCanvas = document.createElement('canvas');
+
+      const scaledCanvas = document.createElement("canvas");
       scaledCanvas.width = scaledWidth;
       scaledCanvas.height = scaledHeight;
-      const scaledCtx = scaledCanvas.getContext('2d')!;
-      
-      const originalCanvas = document.createElement('canvas');
+      const scaledCtx = scaledCanvas.getContext("2d")!;
+
+      const originalCanvas = document.createElement("canvas");
       originalCanvas.width = sourceWidth;
       originalCanvas.height = sourceHeight;
-      const originalCtx = originalCanvas.getContext('2d')!;
+      const originalCtx = originalCanvas.getContext("2d")!;
       originalCtx.putImageData(imageData, 0, 0);
-      
+
       scaledCtx.drawImage(originalCanvas, 0, 0, scaledWidth, scaledHeight);
       sourceImageData = scaledCtx.getImageData(0, 0, scaledWidth, scaledHeight);
       sourceWidth = scaledWidth;
@@ -206,7 +211,6 @@ export class ImageUtils {
         includeAA,
         alpha,
         diffColor: this.hexToRgb(diffColor),
-        diffColorAlt: null,
       },
     );
 
@@ -245,13 +249,59 @@ export class ImageUtils {
       : [255, 0, 0];
   }
 
-  // HTMLレポートの生成
+  // HTMLレポートサイズを推定
+  static estimateReportSize(
+    result: ComparisonResult,
+    beforeImage: CaptureResult,
+    afterImage: CaptureResult,
+  ): number {
+    // data:URLのサイズを推定 (Base64エンコード分も考慮)
+    const beforeSize = beforeImage.dataUrl.length;
+    const afterSize = afterImage.dataUrl.length;
+    const diffSize = result.diffImageUrl.length;
+    const htmlTemplateSize = 100000; // HTMLテンプレート部分の概算サイズ
+
+    return beforeSize + afterSize + diffSize + htmlTemplateSize;
+  }
+
+  // 画像の高さが異常に大きいかチェック
+  static async hasExcessiveImageHeight(
+    beforeImage: CaptureResult,
+    afterImage: CaptureResult,
+  ): Promise<boolean> {
+    const maxSafeHeight = 5000; // 5000px以上の高さは異常とみなす
+
+    try {
+      const beforeData = await this.dataUrlToImageData(beforeImage.dataUrl);
+      const afterData = await this.dataUrlToImageData(afterImage.dataUrl);
+
+      const beforeHeight = beforeData.height;
+      const afterHeight = afterData.height;
+
+      return beforeHeight > maxSafeHeight || afterHeight > maxSafeHeight;
+    } catch (error) {
+      console.warn("画像サイズチェック中にエラーが発生しました:", error);
+      return false; // エラー時は制限なしとして続行
+    }
+  }
+
+  // HTMLレポートの生成（サイズ制限付き）
   static generateReportHtml(
     result: ComparisonResult,
     beforeImage: CaptureResult,
     afterImage: CaptureResult,
+    useLightweightVersion = false,
   ): string {
     const timestamp = new Date(result.timestamp).toLocaleString();
+
+    // 軽量版の場合は画像のプレースホルダーを使用
+    if (useLightweightVersion) {
+      return this.generateLightweightReportHtml(
+        result,
+        beforeImage,
+        afterImage,
+      );
+    }
 
     return `<!DOCTYPE html>
 <html lang="ja">
@@ -772,6 +822,463 @@ export class ImageUtils {
 </html>`;
   }
 
+  // 軽量版HTMLレポートの生成（プレースホルダー画像使用）
+  static generateLightweightReportHtml(
+    result: ComparisonResult,
+    beforeImage: CaptureResult,
+    afterImage: CaptureResult,
+  ): string {
+    const timestamp = new Date(result.timestamp).toLocaleString();
+
+    return `<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:;">
+    <title>VRT Report - ${timestamp}</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            margin: 20px; 
+            background: #f5f7fa; 
+            color: #2c3e50;
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px; 
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        .warning h3 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 0 10px;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background: #2980b9;
+        }
+        .btn.success {
+            background: #27ae60;
+        }
+        .btn.success:hover {
+            background: #219a52;
+        }
+        .stats { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 20px; 
+            margin-bottom: 30px; 
+        }
+        .stat { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+        .placeholder-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        .placeholder-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+        }
+        .placeholder-section { 
+            text-align: center;
+            border: 2px dashed #bdc3c7;
+            border-radius: 8px;
+            padding: 40px 20px;
+            background: #f8f9fa;
+        }
+        .placeholder-section h3 { 
+            margin-bottom: 10px; 
+            color: #2c3e50;
+        }
+        .placeholder-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        .url-info {
+            font-size: 12px;
+            color: #7f8c8d;
+            word-break: break-all;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #ecf0f1;
+            border-radius: 4px;
+        }
+        @media (max-width: 1024px) {
+            .placeholder-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📸 Visual Regression Test Report</h1>
+        <p>Generated on ${timestamp}</p>
+    </div>
+    
+    <div class="warning">
+        <h3>⚠️ 軽量版で表示</h3>
+        <p>ブラウザクラッシュを防ぐため、画像を含まない軽量版で表示しています。</p>
+        <p>（レポートサイズが大きいか、画像の高さが異常に大きいため）</p>
+        <p>完全版をダウンロードして詳細な比較結果をご確認ください。</p>
+    </div>
+    
+    <div style="text-align: center; margin-bottom: 30px;">
+        <button id="download-full-btn" class="btn success">💾 完全版をダウンロード</button>
+        <button id="download-png-btn" class="btn">📸 PNG比較画像をダウンロード</button>
+    </div>
+    
+    <div class="stats">
+        <div class="stat">
+            <h3>差分率</h3>
+            <div class="stat-value" style="color: ${
+      parseFloat(result.diffPercentage) > 5 ? "#e74c3c" : "#27ae60"
+    }">${result.diffPercentage}%</div>
+        </div>
+        <div class="stat">
+            <h3>変更ピクセル数</h3>
+            <div class="stat-value">${result.diffPixels.toLocaleString()}</div>
+        </div>
+        <div class="stat">
+            <h3>総ピクセル数</h3>
+            <div class="stat-value">${result.totalPixels.toLocaleString()}</div>
+        </div>
+    </div>
+    
+    <div class="placeholder-container">
+        <div class="placeholder-grid">
+            <div class="placeholder-section">
+                <div class="placeholder-icon">🔵</div>
+                <h3>Before</h3>
+                <div class="url-info">${result.beforeUrl}</div>
+                <p style="color: #7f8c8d; font-size: 14px;">画像は完全版でご確認ください</p>
+            </div>
+            <div class="placeholder-section">
+                <div class="placeholder-icon">🟠</div>
+                <h3>After</h3>
+                <div class="url-info">${result.afterUrl}</div>
+                <p style="color: #7f8c8d; font-size: 14px;">画像は完全版でご確認ください</p>
+            </div>
+            <div class="placeholder-section">
+                <div class="placeholder-icon">🔴</div>
+                <h3>Diff</h3>
+                <div class="url-info">差分をハイライト表示</div>
+                <p style="color: #7f8c8d; font-size: 14px;">画像は完全版でご確認ください</p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const fullReportData = {
+                result: ${JSON.stringify(result)},
+                beforeImage: {
+                    url: "${beforeImage.url}",
+                    dimensions: ${JSON.stringify(beforeImage.dimensions)},
+                    dataUrl: "${beforeImage.dataUrl}"
+                },
+                afterImage: {
+                    url: "${afterImage.url}",
+                    dimensions: ${JSON.stringify(afterImage.dimensions)},
+                    dataUrl: "${afterImage.dataUrl}"
+                }
+            };
+            
+            // 完全版HTML生成関数
+            function generateFullReportHtml(result, beforeImage, afterImage) {
+                const timestamp = new Date(result.timestamp).toLocaleString();
+                
+                return \`<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:;">
+    <title>VRT Report - \${timestamp}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 20px; background: #f5f7fa; color: #2c3e50; }
+        .header { text-align: center; margin-bottom: 30px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .side-by-side { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+        .image-section { text-align: center; }
+        .image-section h3 { margin-bottom: 10px; color: #2c3e50; }
+        .image-section img { width: 100%; max-width: 100%; border-radius: 4px; border: 1px solid #ddd; }
+        .url-info { font-size: 12px; color: #7f8c8d; word-break: break-all; margin-bottom: 10px; padding: 8px; background: #f8f9fa; border-radius: 4px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat { background: white; padding: 20px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stat-value { font-size: 24px; font-weight: bold; margin-top: 8px; }
+        .view-container { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 30px; }
+        @media (max-width: 1024px) { .side-by-side { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📸 Visual Regression Test Report</h1>
+        <p>Generated on \${timestamp}</p>
+    </div>
+    
+    <div class="stats">
+        <div class="stat">
+            <h3>差分率</h3>
+            <div class="stat-value" style="color: \${parseFloat(result.diffPercentage) > 5 ? '#e74c3c' : '#27ae60'}">\${result.diffPercentage}%</div>
+        </div>
+        <div class="stat">
+            <h3>変更ピクセル数</h3>
+            <div class="stat-value">\${result.diffPixels.toLocaleString()}</div>
+        </div>
+        <div class="stat">
+            <h3>総ピクセル数</h3>
+            <div class="stat-value">\${result.totalPixels.toLocaleString()}</div>
+        </div>
+    </div>
+    
+    <div class="view-container">
+        <div class="side-by-side">
+            <div class="image-section">
+                <h3>🔵 Before</h3>
+                <div class="url-info">\${result.beforeUrl}</div>
+                <img src="\${beforeImage.dataUrl}" alt="Before screenshot">
+            </div>
+            <div class="image-section">
+                <h3>🟠 After</h3>
+                <div class="url-info">\${result.afterUrl}</div>
+                <img src="\${afterImage.dataUrl}" alt="After screenshot">
+            </div>
+            <div class="image-section">
+                <h3>🔴 Diff</h3>
+                <div class="url-info">差分をハイライト表示</div>
+                <img src="\${result.diffImageUrl}" alt="Diff visualization">
+            </div>
+        </div>
+    </div>
+</body>
+</html>\`;
+            }
+            
+            // 完全版ダウンロード
+            const downloadFullBtn = document.getElementById('download-full-btn');
+            if (downloadFullBtn) {
+                downloadFullBtn.addEventListener('click', function() {
+                    try {
+                        // ImageUtilsのgenerateReportHtmlを直接呼び出すのは無理なので、
+                        // 完全版HTMLを再構築する
+                        const fullHtml = generateFullReportHtml(fullReportData.result, fullReportData.beforeImage, fullReportData.afterImage);
+                        
+                        const blob = new Blob([fullHtml], { type: 'text/html' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.download = 'vrt-report-full-' + new Date().toISOString().slice(0,19).replace(/:/g, '-') + '.html';
+                        link.href = url;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                        
+                        // ボタンを更新
+                        this.textContent = '✅ ダウンロード完了';
+                        this.style.background = '#27ae60';
+                        
+                        setTimeout(() => {
+                            this.textContent = '💾 完全版をダウンロード';
+                            this.style.background = '#27ae60';
+                        }, 2000);
+                    } catch (error) {
+                        console.error('完全版ダウンロードエラー:', error);
+                        alert('完全版のダウンロードに失敗しました: ' + error.message);
+                    }
+                });
+            }
+            
+            // PNG比較画像ダウンロード
+            const downloadPngBtn = document.getElementById('download-png-btn');
+            if (downloadPngBtn) {
+                downloadPngBtn.addEventListener('click', function() {
+                    this.disabled = true;
+                    this.textContent = '🔄 生成中...';
+                    
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        
+                        if (!ctx) {
+                            throw new Error('Canvasコンテキストが取得できません');
+                        }
+                        
+                        // Before、After、Diff画像を読み込んで横並びPNGを生成
+                        const maxImageWidth = 400;
+                        const imageSpacing = 30;
+                        const headerHeight = 120;
+                        
+                        canvas.width = maxImageWidth * 3 + imageSpacing * 4;
+                        canvas.height = headerHeight + maxImageWidth * 0.8 + 100;
+                        
+                        // 背景色を白に設定
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        
+                        // ヘッダー描画
+                        ctx.fillStyle = '#2c3e50';
+                        ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('📸 VRT 比較結果', canvas.width / 2, 40);
+                        
+                        ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.fillText('${timestamp}', canvas.width / 2, 70);
+                        
+                        ctx.font = '18px -apple-system, BlinkMacSystemFont, sans-serif';
+                        ctx.fillStyle = parseFloat('${result.diffPercentage}') > 5 ? '#e74c3c' : '#27ae60';
+                        ctx.fillText('差分率: ${result.diffPercentage}%', canvas.width / 2, 100);
+                        
+                        let imagesLoaded = 0;
+                        const totalImagesToLoad = 3;
+                        
+                        function checkAllImagesLoaded() {
+                            imagesLoaded++;
+                            if (imagesLoaded === totalImagesToLoad) {
+                                canvas.toBlob(function(blob) {
+                                    if (blob) {
+                                        const url = URL.createObjectURL(blob);
+                                        const link = document.createElement('a');
+                                        link.download = 'vrt-comparison-' + new Date().toISOString().slice(0,19).replace(/:/g, '-') + '.png';
+                                        link.href = url;
+                                        document.body.appendChild(link);
+                                        link.click();
+                                        document.body.removeChild(link);
+                                        URL.revokeObjectURL(url);
+                                        
+                                        downloadPngBtn.textContent = '✅ ダウンロード完了';
+                                        downloadPngBtn.style.background = '#27ae60';
+                                        
+                                        setTimeout(() => {
+                                            downloadPngBtn.textContent = '📸 PNG比較画像をダウンロード';
+                                            downloadPngBtn.style.background = '#3498db';
+                                            downloadPngBtn.disabled = false;
+                                        }, 2000);
+                                    }
+                                }, 'image/png');
+                            }
+                        }
+                        
+                        // Before画像を描画
+                        const beforeImg = new Image();
+                        beforeImg.onload = function() {
+                            const beforeX = imageSpacing;
+                            const beforeY = headerHeight;
+                            
+                            ctx.fillStyle = '#3498db';
+                            ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+                            ctx.textAlign = 'left';
+                            ctx.fillText('🔵 Before', beforeX, beforeY - 40);
+                            
+                            ctx.fillStyle = '#7f8c8d';
+                            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+                            const truncatedBeforeUrl = '${result.beforeUrl}'.length > 40 ? '${result.beforeUrl}'.substring(0, 37) + '...' : '${result.beforeUrl}';
+                            ctx.fillText(truncatedBeforeUrl, beforeX, beforeY - 15);
+                            
+                            const beforeAspectRatio = beforeImg.naturalWidth / beforeImg.naturalHeight;
+                            const beforeHeight = maxImageWidth / beforeAspectRatio;
+                            ctx.drawImage(beforeImg, beforeX, beforeY, maxImageWidth, beforeHeight);
+                            
+                            checkAllImagesLoaded();
+                        };
+                        beforeImg.onerror = () => checkAllImagesLoaded();
+                        beforeImg.src = fullReportData.beforeImage.dataUrl;
+                        
+                        // After画像を描画
+                        const afterImg = new Image();
+                        afterImg.onload = function() {
+                            const afterX = maxImageWidth + imageSpacing * 2;
+                            const afterY = headerHeight;
+                            
+                            ctx.fillStyle = '#e67e22';
+                            ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+                            ctx.textAlign = 'left';
+                            ctx.fillText('🟠 After', afterX, afterY - 40);
+                            
+                            ctx.fillStyle = '#7f8c8d';
+                            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+                            const truncatedAfterUrl = '${result.afterUrl}'.length > 40 ? '${result.afterUrl}'.substring(0, 37) + '...' : '${result.afterUrl}';
+                            ctx.fillText(truncatedAfterUrl, afterX, afterY - 15);
+                            
+                            const afterAspectRatio = afterImg.naturalWidth / afterImg.naturalHeight;
+                            const afterHeight = maxImageWidth / afterAspectRatio;
+                            ctx.drawImage(afterImg, afterX, afterY, maxImageWidth, afterHeight);
+                            
+                            checkAllImagesLoaded();
+                        };
+                        afterImg.onerror = () => checkAllImagesLoaded();
+                        afterImg.src = fullReportData.afterImage.dataUrl;
+                        
+                        // Diff画像を描画
+                        const diffImg = new Image();
+                        diffImg.onload = function() {
+                            const diffX = maxImageWidth * 2 + imageSpacing * 3;
+                            const diffY = headerHeight;
+                            
+                            ctx.fillStyle = '#e74c3c';
+                            ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+                            ctx.textAlign = 'left';
+                            ctx.fillText('🔴 Diff', diffX, diffY - 40);
+                            
+                            ctx.fillStyle = '#7f8c8d';
+                            ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+                            ctx.fillText('変更箇所をハイライト表示', diffX, diffY - 15);
+                            
+                            const diffAspectRatio = diffImg.naturalWidth / diffImg.naturalHeight;
+                            const diffHeight = maxImageWidth / diffAspectRatio;
+                            ctx.drawImage(diffImg, diffX, diffY, maxImageWidth, diffHeight);
+                            
+                            checkAllImagesLoaded();
+                        };
+                        diffImg.onerror = () => checkAllImagesLoaded();
+                        diffImg.src = fullReportData.result.diffImageUrl;
+                        
+                    } catch (error) {
+                        console.error('PNG生成エラー:', error);
+                        alert('PNGの生成に失敗しました: ' + error.message);
+                        this.textContent = '📸 PNG比較画像をダウンロード';
+                        this.disabled = false;
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>`;
+  }
+
   // PNGレポートの生成
   static async generateReportPng(
     result: ComparisonResult,
@@ -936,4 +1443,3 @@ export class ImageUtils {
     });
   }
 }
-

@@ -12,18 +12,32 @@ import type {
 export class ChromeAPI {
   // スクリーンショットを撮影
   static async captureScreenshot(options: any = {}): Promise<CaptureResult> {
-    return new Promise((resolve, reject) => {
-      // 現在のタブ情報を先に取得
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        
+    return new Promise(async (resolve, reject) => {
+      try {
+        // 現在のタブ情報を先に取得
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         const activeTab = tabs[0];
+        
         if (!activeTab || !activeTab.id) {
           reject(new Error('アクティブなタブが見つかりません'));
           return;
+        }
+
+        // content scriptを通じてページの準備
+        if (options.maskVideos || options.autoScroll) {
+          try {
+            await this.sendTabMessage(activeTab.id, {
+              type: 'PREPARE_FOR_CAPTURE',
+              options: options
+            });
+          } catch (error) {
+            console.warn('ページ準備エラー（続行）:', error);
+          }
+        }
+
+        // キャプチャ遅延
+        if (options.captureDelay && options.captureDelay > 0) {
+          await new Promise(resolve => setTimeout(resolve, options.captureDelay * 1000));
         }
 
         // タブのウィンドウIDを指定してキャプチャ
@@ -40,7 +54,9 @@ export class ChromeAPI {
             reject(new Error('スクリーンショットの撮影に失敗しました'));
           }
         });
-      });
+      } catch (error) {
+        reject(error);
+      }
     });
   }
 
@@ -139,7 +155,8 @@ export class ChromeAPI {
         imageQuality: 'medium',
         autoScroll: false,
         diffThreshold: 0.1,
-        diffColor: '#ff0000'
+        diffColor: '#ff0000',
+        maskVideos: false
       };
 
       chrome.storage.local.get('vrtSettings', (result) => {
@@ -326,19 +343,6 @@ export class ChromeAPI {
             await this.sendDebuggerCommand(tabId, 'Page.enable', {});
             await this.sendDebuggerCommand(tabId, 'Runtime.enable', {});
 
-            // ビューポート幅設定を最初に実行
-            const viewportWidth = options.viewportWidth;
-            if (viewportWidth && viewportWidth > 0) {
-              console.log(`カスタムビューポート幅を設定: ${viewportWidth}px`);
-              
-              // 指定された幅でビューポートを設定（ページロード前）
-              await this.sendDebuggerCommand(tabId, 'Emulation.setDeviceMetricsOverride', {
-                width: viewportWidth,
-                height: 800, // 初期高さ
-                deviceScaleFactor: 1,
-                mobile: viewportWidth <= 768
-              });
-            }
 
             // DOMContentLoadedまで待機
             await this.sendDebuggerCommand(tabId, 'Page.reload', { ignoreCache: false });
@@ -348,6 +352,46 @@ export class ChromeAPI {
             await this.sendDebuggerCommand(tabId, 'Runtime.evaluate', {
               expression: `
                 (function() {
+                  // video要素のマスク処理
+                  ${options.maskVideos ? `
+                  const videoElements = document.querySelectorAll('video');
+                  videoElements.forEach(video => {
+                    const computedStyle = window.getComputedStyle(video);
+                    if (computedStyle.position === 'static') {
+                      video.style.position = 'relative';
+                    }
+                    
+                    const maskElement = document.createElement('div');
+                    maskElement.style.cssText = \`
+                      position: absolute;
+                      top: 0;
+                      left: 0;
+                      width: 100%;
+                      height: 100%;
+                      background-color: #f0f0f0;
+                      background-image: linear-gradient(45deg, #e0e0e0 25%, transparent 25%), 
+                                       linear-gradient(-45deg, #e0e0e0 25%, transparent 25%), 
+                                       linear-gradient(45deg, transparent 75%, #e0e0e0 75%), 
+                                       linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+                      background-size: 20px 20px;
+                      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      color: #888;
+                      font-family: Arial, sans-serif;
+                      font-size: 14px;
+                      font-weight: bold;
+                      text-align: center;
+                      z-index: 999999;
+                      pointer-events: none;
+                    \`;
+                    maskElement.textContent = 'VIDEO MASKED';
+                    maskElement.className = 'quick-vrt-video-mask';
+                    video.appendChild(maskElement);
+                  });
+                  ` : ''}
+                  
                   // ページの最下部まで段階的にスクロール
                   const scrollHeight = document.documentElement.scrollHeight;
                   const viewportHeight = window.innerHeight;
@@ -390,22 +434,8 @@ export class ChromeAPI {
             // レイアウトメトリクスを取得
             const layoutMetrics = await this.sendDebuggerCommand(tabId, 'Page.getLayoutMetrics', {});
             
-            if (viewportWidth && viewportWidth > 0) {
-              // カスタムビューポート幅使用時
-              captureWidth = viewportWidth;
-              captureHeight = Math.min(layoutMetrics.cssContentSize.height, 10000); // 高さ制限でメモリ節約
-              
-              console.log(`カスタムキャプチャサイズ: ${captureWidth} x ${captureHeight}`);
-              
-              // 最終サイズで設定
-              await this.sendDebuggerCommand(tabId, 'Emulation.setDeviceMetricsOverride', {
-                width: captureWidth,
-                height: captureHeight,
-                deviceScaleFactor: 1,
-                mobile: viewportWidth <= 768
-              });
-            } else {
-              // デフォルトサイズ使用時（メモリ制限あり）
+            {
+              // メモリ制限ありのデフォルトサイズ
               captureWidth = Math.min(layoutMetrics.cssContentSize.width, 2000); // 幅制限
               captureHeight = Math.min(layoutMetrics.cssContentSize.height, 10000); // 高さ制限
               

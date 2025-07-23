@@ -4,6 +4,7 @@ class QuickVRTContent {
   private originalScrollBehavior: string | null = null;
   private originalBodyStyles: { [key: string]: string } = {};
   private originalHtmlStyles: { [key: string]: string } = {};
+  private maskedVideoElements: { element: HTMLVideoElement; originalStyles: any }[] = [];
 
   constructor() {
     this.init();
@@ -78,6 +79,16 @@ class QuickVRTContent {
           sendResponse({ success: true });
           break;
 
+        case 'MASK_VIDEOS':
+          this.maskVideoElements();
+          sendResponse({ success: true });
+          break;
+
+        case 'UNMASK_VIDEOS':
+          this.unmaskVideoElements();
+          sendResponse({ success: true });
+          break;
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -93,6 +104,11 @@ class QuickVRTContent {
       // ページの安定化のための処理
       if (options.disableAnimations) {
         this.disableAnimations();
+      }
+
+      // video要素のマスク
+      if (options.maskVideos) {
+        this.maskVideoElements();
       }
 
       // スクロール処理
@@ -380,6 +396,9 @@ class QuickVRTContent {
       style.remove();
     }
 
+    // video要素のマスク解除
+    this.unmaskVideoElements();
+
     // スクロール動作の復元
     if (this.originalScrollBehavior !== null) {
       document.documentElement.style.scrollBehavior = this.originalScrollBehavior;
@@ -465,6 +484,11 @@ class QuickVRTContent {
         this.disableAnimations();
       }
 
+      // video要素のマスク
+      if (options.maskVideos) {
+        this.maskVideoElements();
+      }
+
       // ページ全体をスクロールしてlazy loadingをトリガー
       if (options.triggerLazyLoading !== false) {
         await this.performFullPageScroll();
@@ -535,6 +559,11 @@ class QuickVRTContent {
       // アニメーション無効化
       if (options.disableAnimations !== false) {
         this.disableAnimations();
+      }
+
+      // video要素のマスク
+      if (options.maskVideos) {
+        this.maskVideoElements();
       }
 
       // ページ全体をスクロールしてlazy loadingをトリガー
@@ -691,6 +720,107 @@ class QuickVRTContent {
       const el = element as HTMLElement;
       // 元々fixedだった可能性があるが、判別が難しいので、ページ復元で対応
     });
+  }
+
+  // video要素のマスク
+  private maskVideoElements(): void {
+    try {
+      // 既にマスクされた要素をクリア
+      this.unmaskVideoElements();
+
+      // ページ内のすべてのvideo要素を取得
+      const videoElements = document.querySelectorAll('video');
+      
+      videoElements.forEach((video: HTMLVideoElement) => {
+        // 元のスタイルを保存
+        const originalStyles = {
+          visibility: video.style.visibility,
+          opacity: video.style.opacity,
+          backgroundColor: video.style.backgroundColor,
+          backgroundImage: video.style.backgroundImage,
+          filter: video.style.filter
+        };
+
+        // マスク用のスタイルを適用
+        video.style.visibility = 'visible';
+        video.style.opacity = '1';
+        video.style.backgroundColor = '#f0f0f0';
+        video.style.backgroundImage = 'none';
+        video.style.filter = 'none';
+
+        // マスク用の要素を作成してvideoの上に被せる
+        const maskElement = document.createElement('div');
+        maskElement.style.cssText = `
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: #f0f0f0;
+          background-image: linear-gradient(45deg, #e0e0e0 25%, transparent 25%), 
+                           linear-gradient(-45deg, #e0e0e0 25%, transparent 25%), 
+                           linear-gradient(45deg, transparent 75%, #e0e0e0 75%), 
+                           linear-gradient(-45deg, transparent 75%, #e0e0e0 75%);
+          background-size: 20px 20px;
+          background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #888;
+          font-family: Arial, sans-serif;
+          font-size: 14px;
+          font-weight: bold;
+          text-align: center;
+          z-index: 999999;
+          pointer-events: none;
+        `;
+        maskElement.textContent = 'VIDEO MASKED';
+        maskElement.className = 'quick-vrt-video-mask';
+
+        // videoの位置を相対位置に設定
+        const computedStyle = window.getComputedStyle(video);
+        if (computedStyle.position === 'static') {
+          video.style.position = 'relative';
+        }
+
+        // マスク要素をvideoに追加
+        video.appendChild(maskElement);
+
+        // マスクされた要素情報を保存
+        this.maskedVideoElements.push({
+          element: video,
+          originalStyles: originalStyles
+        });
+      });
+
+      console.log(`${videoElements.length}個のvideo要素をマスクしました`);
+    } catch (error) {
+      console.error('video要素マスクエラー:', error);
+    }
+  }
+
+  // video要素のマスク解除
+  private unmaskVideoElements(): void {
+    try {
+      // マスクされた要素を復元
+      this.maskedVideoElements.forEach(({ element, originalStyles }) => {
+        // 元のスタイルを復元
+        Object.keys(originalStyles).forEach(prop => {
+          element.style[prop as any] = originalStyles[prop] || '';
+        });
+
+        // マスク要素を削除
+        const maskElements = element.querySelectorAll('.quick-vrt-video-mask');
+        maskElements.forEach(mask => mask.remove());
+      });
+
+      // マスクされた要素リストをクリア
+      this.maskedVideoElements = [];
+
+      console.log('video要素のマスクを解除しました');
+    } catch (error) {
+      console.error('video要素マスク解除エラー:', error);
+    }
   }
 }
 

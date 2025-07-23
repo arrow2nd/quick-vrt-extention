@@ -10,7 +10,6 @@ import { ComparisonTabs } from './components/ComparisonTabs';
 import { ComparisonView } from './components/ComparisonView';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { TabUrlSelector } from './components/TabUrlSelector';
-import { ViewportSettings } from './components/ViewportSettings';
 
 // Hooks
 import { useVRT } from './hooks/useVRT';
@@ -34,7 +33,6 @@ function App() {
     afterUrl,
     showTabSelector,
     useFullPageCapture,
-    viewportWidth,
     
     // アクション
     initialize,
@@ -48,7 +46,6 @@ function App() {
     selectUrlFromTab,
     setShowTabSelector,
     setUseFullPageCapture,
-    setViewportWidth,
     goToStep,
     compareImages,
     saveResult,
@@ -152,10 +149,6 @@ function App() {
             <p>現在のページのスクリーンショットを撮影します</p>
           </div>
 
-          <ViewportSettings
-            viewportWidth={viewportWidth}
-            onViewportWidthChange={setViewportWidth}
-          />
 
           <div className="capture-options">
             <label className="checkbox-container">
@@ -209,7 +202,7 @@ function App() {
               />
               <button
                 type="button"
-                className="btn-small secondary"
+                className="btn secondary"
                 onClick={() => setShowTabSelector(true)}
               >
                 タブから選択
@@ -264,7 +257,7 @@ function App() {
           
           <div className="result-actions">
             <button className="btn primary" onClick={handleSave}>
-              📁 結果を保存
+              💾 レポートダウンロード
             </button>
             <button className="btn secondary" onClick={startNewComparison}>
               新しい比較
@@ -310,7 +303,7 @@ function App() {
                   className="btn small primary" 
                   onClick={() => openHistoryItemAsHtml(item)}
                 >
-                  📄 テストレポートを開く
+                  💾 レポートダウンロード
                 </button>
               </div>
             </div>
@@ -349,6 +342,21 @@ function App() {
               }}
             />
             <small>ページ読み込み後の待機時間</small>
+          </div>
+          
+          <div className="setting-item">
+            <label className="checkbox-label">
+              <input 
+                type="checkbox" 
+                checked={settings.maskVideos}
+                onChange={(e) => {
+                  const newSettings = { ...settings, maskVideos: e.currentTarget.checked };
+                  saveSettings(newSettings);
+                }}
+              />
+              video要素をマスクする
+            </label>
+            <small>動画要素を比較結果に影響しないようマスクします</small>
           </div>
         </div>
 

@@ -67,7 +67,8 @@ class QuickVRTBackground {
         imageQuality: 'medium',
         autoScroll: false,
         diffThreshold: 0.1,
-        diffColor: '#ff0000'
+        diffColor: '#ff0000',
+        maskVideos: false
       };
 
       await chrome.storage.local.set({
